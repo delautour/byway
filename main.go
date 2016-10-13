@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,21 +13,40 @@ import (
 )
 
 type headers map[string]string
+type rewrite func(string) string
 
 type binding struct {
-	host    string
-	scheme  string
-	headers headers
+	host        string
+	scheme      string
+	pathRewrite rewrite
+	headers     headers
+}
+
+func regexReplaceRewrite(pattern string, replace string) rewrite {
+	re := regexp.MustCompile(pattern)
+
+	fn := func(input string) string {
+		result := re.ReplaceAllString(input, replace)
+		log.Printf("byway: Rewrite %s -> %s", input, result)
+		return result
+	}
+	return fn
 }
 
 func newBinding(template binding) binding {
-	r := binding{scheme: "http", headers: headers{}}
+	identity := func(i string) string {
+		return i
+	}
+	r := binding{scheme: "http", headers: headers{}, pathRewrite: identity}
 	r.host = template.host
 	if template.scheme != "" {
 		r.scheme = template.scheme
 	}
 	if template.headers != nil {
 		r.headers = template.headers
+	}
+	if template.pathRewrite != nil {
+		r.pathRewrite = template.pathRewrite
 	}
 
 	return r
@@ -50,8 +70,8 @@ var serviceTable = map[string]map[string]binding{
 	},
 }
 
-func versionify(s string) *version.Version {
-	formatted := strings.Replace(s, "-", ".", 3)
+func versionify(versionStr string) *version.Version {
+	formatted := strings.Replace(versionStr, "-", ".", 3)
 	v, err := version.NewVersion(formatted)
 	if err != nil {
 		return nil
@@ -173,8 +193,9 @@ func newBywayProxy() *httputil.ReverseProxy {
 		binding := resolveBinding(minVersion, maxVersion, serviceName)
 
 		if binding != nil {
-			log.Printf("byway: Routing to %s://%s", binding.scheme, binding.host)
+			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.scheme, binding.host, binding.headers["host"])
 			req.Header.Add("X-Forwarded-Host", req.Host)
+			req.URL.Path = binding.pathRewrite(req.URL.Path)
 			req.URL.Scheme = binding.scheme
 			req.URL.Host = binding.host
 			req.Host = binding.headers["host"]
