@@ -1,4 +1,4 @@
-package main
+package core
 
 import (
 	"fmt"
@@ -12,17 +12,24 @@ import (
 	"github.com/hashicorp/go-version"
 )
 
-type headers map[string]string
-type rewrite func(string) string
+// Headers - a list of headers to set
+type Headers map[string]string
 
-type binding struct {
-	host        string
-	scheme      string
-	pathRewrite rewrite
-	headers     headers
+// Rewrite - a path rewrite func
+type Rewrite func(string) string
+
+// Binding - a endpoint binding
+type Binding struct {
+	Host        string
+	Scheme      string
+	PathRewrite Rewrite
+	Headers     Headers
 }
 
-func regexReplaceRewrite(pattern string, replace string) rewrite {
+// ServiceTable - A list map of service / version bindings
+type ServiceTable map[string]map[string]Binding
+
+func regexReplaceRewrite(pattern string, replace string) Rewrite {
 	re := regexp.MustCompile(pattern)
 
 	fn := func(input string) string {
@@ -31,43 +38,6 @@ func regexReplaceRewrite(pattern string, replace string) rewrite {
 		return result
 	}
 	return fn
-}
-
-func newBinding(template binding) binding {
-	identity := func(i string) string {
-		return i
-	}
-	r := binding{scheme: "http", headers: headers{}, pathRewrite: identity}
-	r.host = template.host
-	if template.scheme != "" {
-		r.scheme = template.scheme
-	}
-	if template.headers != nil {
-		r.headers = template.headers
-	}
-	if template.pathRewrite != nil {
-		r.pathRewrite = template.pathRewrite
-	}
-
-	return r
-}
-
-func localhostBinding(host string) binding {
-	return newBinding(binding{host: "localhost:8081", headers: headers{"host": host}})
-}
-
-var serviceTable = map[string]map[string]binding{
-	"search": {
-		"1.0.0": newBinding(binding{host: "www.aol.com"}),
-		"2.0.0": newBinding(binding{host: "www.yahoo.com"}),
-		"3.0.0": newBinding(binding{host: "www.google.com"}),
-		"4.0.0": newBinding(binding{host: "www.bing.com"}),
-	},
-	"echo": {
-		"1.0.0": localhostBinding("1-0-0.echo"),
-		"1.0.1": localhostBinding("1-0-1.echo"),
-		"1.0.2": localhostBinding("1-0-2.echo"),
-	},
 }
 
 func versionify(versionStr string) *version.Version {
@@ -142,7 +112,7 @@ func bulidContraint(minVersion *version.Version, maxVersion *version.Version) ve
 	return constraint
 }
 
-func resolveBinding(minVersion *version.Version, maxVersion *version.Version, serviceName string) *binding {
+func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxVersion *version.Version, serviceName string) *Binding {
 
 	log.Printf("byway: -- Locating version table: %s --", serviceName)
 	vTable := serviceTable[serviceName]
@@ -186,19 +156,23 @@ func resolveBinding(minVersion *version.Version, maxVersion *version.Version, se
 	return nil
 }
 
-func newBywayProxy() *httputil.ReverseProxy {
+func newBywayProxy(serviceTable ServiceTable) *httputil.ReverseProxy {
 	director := func(req *http.Request) {
 		log.Println("byway: -----------ROUTE BEGIN-----------")
 		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(minVersion, maxVersion, serviceName)
+		binding := resolveBinding(serviceTable, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
-			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.scheme, binding.host, binding.headers["host"])
+			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.Scheme, binding.Host, binding.Headers["host"])
 			req.Header.Add("X-Forwarded-Host", req.Host)
-			req.URL.Path = binding.pathRewrite(req.URL.Path)
-			req.URL.Scheme = binding.scheme
-			req.URL.Host = binding.host
-			req.Host = binding.headers["host"]
+			req.URL.Path = binding.PathRewrite(req.URL.Path)
+			req.URL.Scheme = binding.Scheme
+			req.URL.Host = binding.Host
+			req.Host = binding.Headers["host"]
+			if req.Host == "" {
+				req.Host = binding.Host
+			}
+
 		}
 		log.Println("byway: -----------ROUTE END-----------")
 	}
@@ -206,26 +180,11 @@ func newBywayProxy() *httputil.ReverseProxy {
 	return &httputil.ReverseProxy{Director: director}
 }
 
-func echo(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "Echo\n--------------------------------\n")
-	fmt.Fprintf(w, "%s%s\n--------------------------------\n", r.Host, r.URL.RequestURI())
-	for k, v := range r.Header {
-		for _, v := range v {
-			fmt.Fprintf(w, "%s: %s\n", k, v)
-		}
-	}
-}
-
-func main() {
-	go func() {
-		echoMux := http.NewServeMux()
-		echoMux.HandleFunc("/", echo)
-		http.ListenAndServe(":8081", echoMux)
-	}()
-
+// Init run the router
+func Init(serviceTable ServiceTable) {
 	port := ":31337"
 	fmt.Printf("Running byway on " + port + "!\n")
-	proxy := newBywayProxy()
+	proxy := newBywayProxy(serviceTable)
 
 	http.ListenAndServe(port, proxy)
 }
