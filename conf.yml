@@ -1,0 +1,34 @@
+---
+echo:
+  1.0.0:
+    host: localhost:8081
+    scheme: http
+    headers:
+      host: 1-0-0.echo.example.com
+  1.0.1:
+    host: localhost:8081
+    scheme: http
+    headers:
+      host: 1-0-1.echo.example.com
+  1.0.2:
+    host: localhost:8081
+    scheme: http
+    headers:
+      host: 1-0-2.echo.example.com
+search:
+  1.0.0:
+    host: www.aol.com
+    scheme: http
+    headers: {}
+  2.0.0:
+    host: www.yahoo.com
+    scheme: http
+    headers: {}
+  3.0.0:
+    host: www.google.com
+    scheme: http
+    headers: {}
+  4.0.0:
+    host: www.bing.com
+    scheme: http
+    headers: {}

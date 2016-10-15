@@ -20,10 +20,11 @@ type Rewrite func(string) string
 
 // Binding - a endpoint binding
 type Binding struct {
-	Host        string
-	Scheme      string
-	PathRewrite Rewrite
-	Headers     Headers
+	Host          string
+	Scheme        string
+	PathRewriteFn Rewrite `yaml:"-"`
+	PathRewrite   string
+	Headers       Headers
 }
 
 // ServiceTable - A list map of service / version bindings
@@ -156,16 +157,18 @@ func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxV
 	return nil
 }
 
-func newBywayProxy(serviceTable ServiceTable) *httputil.ReverseProxy {
+func newBywayProxy(serviceTable **ServiceTable) *httputil.ReverseProxy {
 	director := func(req *http.Request) {
 		log.Println("byway: -----------ROUTE BEGIN-----------")
 		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(serviceTable, minVersion, maxVersion, serviceName)
+		binding := resolveBinding(**serviceTable, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
 			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.Scheme, binding.Host, binding.Headers["host"])
 			req.Header.Add("X-Forwarded-Host", req.Host)
-			req.URL.Path = binding.PathRewrite(req.URL.Path)
+			if binding.PathRewriteFn != nil {
+				req.URL.Path = binding.PathRewriteFn(req.URL.Path)
+			}
 			req.URL.Scheme = binding.Scheme
 			req.URL.Host = binding.Host
 			req.Host = binding.Headers["host"]
@@ -181,10 +184,12 @@ func newBywayProxy(serviceTable ServiceTable) *httputil.ReverseProxy {
 }
 
 // Init run the router
-func Init(serviceTable ServiceTable) {
-	port := ":31337"
-	fmt.Printf("Running byway on " + port + "!\n")
-	proxy := newBywayProxy(serviceTable)
+func Init(serviceTable **ServiceTable) {
+	go func() {
+		port := ":31337"
+		fmt.Printf("Running on " + port + "!\n")
+		proxy := newBywayProxy(serviceTable)
 
-	http.ListenAndServe(port, proxy)
+		http.ListenAndServe(port, proxy)
+	}()
 }
