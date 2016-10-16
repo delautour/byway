@@ -5,56 +5,138 @@ import (
 	"io/ioutil"
 	"log"
 
+	"encoding/json"
+
 	"github.com/amerdrix/byway/core"
+	"gopkg.in/redis.v5"
 	"gopkg.in/yaml.v2"
 )
 
-func newBinding(template core.Binding) core.Binding {
-	identity := func(i string) string {
-		return i
-	}
-	r := core.Binding{Scheme: "http", Headers: core.Headers{}, PathRewriteFn: identity}
-	r.Host = template.Host
-	if template.Scheme != "" {
-		r.Scheme = template.Scheme
-	}
-	if template.Headers != nil {
-		r.Headers = template.Headers
-	}
-	if template.PathRewriteFn != nil {
-		r.PathRewriteFn = template.PathRewriteFn
-	}
-
-	return r
+type endpointConfig struct {
+	Host    string
+	Scheme  string
+	Rewrite string
+	Headers map[string]string
 }
 
-func localhostBinding(host string) core.Binding {
-	return newBinding(core.Binding{Host: "localhost:8081", Headers: core.Headers{"host": host}})
+func mapEndpointConfig(endpointConfig endpointConfig) core.Binding {
+	return core.Binding{
+		Host:          endpointConfig.Host,
+		Scheme:        endpointConfig.Scheme,
+		Headers:       endpointConfig.Headers,
+		PathRewriteFn: core.IdentityRewrite}
+
 }
 
-func watchConfig(currentTable **core.ServiceTable) {
-	config, err := ioutil.ReadFile("./conf.yml")
+func watchConfigFile(channel chan core.ServiceTable) {
+	configFile, err := ioutil.ReadFile("./conf.yml")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	config := make(map[string]map[string]endpointConfig)
+	yaml.Unmarshal(configFile, &config)
+
+	log.Println("byway: Loading config")
+
 	newTable := make(core.ServiceTable)
-	yaml.Unmarshal(config, &newTable)
+	for serviceName, versionMap := range config {
+		versionTable := make(map[core.VersionString]core.Binding)
+		for versionStr, endpointConfig := range versionMap {
+			binding := mapEndpointConfig(endpointConfig)
 
-	log.Printf("byway: host -%s\n", newTable["echo"]["1.0.0"].Headers["host"])
+			versionTable[core.VersionString(versionStr)] = binding
+		}
 
-	*currentTable = &newTable
+		newTable[core.ServiceName(serviceName)] = versionTable
+	}
+	channel <- newTable
+}
+
+func readRedisConfig(redis *redis.Client) core.ServiceTable {
+	indexName := "byway.service_index"
+	members := redis.SMembers(indexName)
+	if members.Err() != nil {
+		log.Fatalf("byway: redis: %s", members.Err())
+	}
+
+	log.Printf("byway: redis: %s\n", members)
+
+	table := core.ServiceTable{}
+
+	for _, serviceName := range members.Val() {
+		versionTable := make(map[core.VersionString]core.Binding)
+
+		vtable := redis.HGetAll("byway.service." + serviceName)
+		if vtable.Err() != nil {
+			log.Fatalf("byway: redis: %s", vtable.Err())
+		}
+		log.Printf("byway: redis: %s\n", vtable)
+
+		for serviceVersion, endpoint := range vtable.Val() {
+			log.Printf("byway: redis: %s:%s \n", serviceVersion, endpoint)
+
+			ep := endpointConfig{}
+
+			err := json.Unmarshal([]byte(endpoint), &ep)
+			if err != nil {
+				log.Fatalf("byway: redis: %s", err)
+			}
+
+			versionTable[core.VersionString(serviceVersion)] = mapEndpointConfig(ep)
+		}
+
+		table[core.ServiceName(serviceName)] = versionTable
+	}
+
+	return table
+}
+
+func watchRedis(channel chan core.ServiceTable) {
+
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	pong, err := client.Ping().Result()
+	if err != nil {
+		log.Fatalf("byway: redis: %s\n", err)
+	}
+	log.Printf("byway: redis: %s", pong)
+
+	//subscription, err := client.Subscribe("byway_config")
+
+	// if err != nil {
+	// 	log.Fatalf("byway: redis: %s\n", err)
+	// }
+	//subscription.
+	channel <- readRedisConfig(client)
+	//subscription.
 
 }
 
 func main() {
 	fmt.Println("Welcome to byway")
+	serviceTableWriter := make(chan core.ServiceTable)
+	serviceTableReader := make(chan core.ServiceTable)
 
-	defaultTable := core.ServiceTable{}
-	currentTable := &defaultTable
-	watchConfig(&currentTable)
+	go func() {
+		for {
+			table := <-serviceTableReader
 
-	core.Init(&currentTable)
+			loaded, _ := yaml.Marshal(table)
+			log.Printf("byway: config updated\n%s", loaded)
+
+			serviceTableWriter <- table
+		}
+	}()
+
+	core.Init(serviceTableWriter)
+
+	watchRedis(serviceTableReader)
+	//watchConfigFile(serviceTableReader)
 
 	exit := make(chan bool)
 	<-exit

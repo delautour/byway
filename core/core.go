@@ -23,14 +23,25 @@ type Binding struct {
 	Host          string
 	Scheme        string
 	PathRewriteFn Rewrite `yaml:"-"`
-	PathRewrite   string
 	Headers       Headers
 }
 
-// ServiceTable - A list map of service / version bindings
-type ServiceTable map[string]map[string]Binding
+// VersionString - A version of a service 1.0.0
+type VersionString string
 
-func regexReplaceRewrite(pattern string, replace string) Rewrite {
+// ServiceName - A name of a service
+type ServiceName string
+
+// ServiceTable - A list map of service / version bindings
+type ServiceTable map[ServiceName]map[VersionString]Binding
+
+// IdentityRewrite a rewrite rule which is the identity
+func IdentityRewrite(input string) string {
+	return input
+}
+
+// NewRegexReplaceRewrite returns a new rewrite rule based on a regular expression
+func NewRegexReplaceRewrite(pattern string, replace string) Rewrite {
 	re := regexp.MustCompile(pattern)
 
 	fn := func(input string) string {
@@ -50,7 +61,7 @@ func versionify(versionStr string) *version.Version {
 	return v
 }
 
-func extractRoutingParameters(req *http.Request) (*version.Version, *version.Version, string) {
+func extractRoutingParameters(req *http.Request) (*version.Version, *version.Version, ServiceName) {
 	log.Print("byway: -- extractRoutingParameters --")
 	var minVersion *version.Version
 	var maxVersion *version.Version
@@ -94,7 +105,7 @@ func extractRoutingParameters(req *http.Request) (*version.Version, *version.Ver
 		log.Printf("byway: Identified service from header: %s", serviceName)
 	}
 
-	return minVersion, maxVersion, serviceName
+	return minVersion, maxVersion, ServiceName(serviceName)
 }
 
 func bulidContraint(minVersion *version.Version, maxVersion *version.Version) version.Constraints {
@@ -113,7 +124,7 @@ func bulidContraint(minVersion *version.Version, maxVersion *version.Version) ve
 	return constraint
 }
 
-func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxVersion *version.Version, serviceName string) *Binding {
+func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *Binding {
 
 	log.Printf("byway: -- Locating version table: %s --", serviceName)
 	vTable := serviceTable[serviceName]
@@ -125,7 +136,8 @@ func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxV
 	log.Println("byway: Building version list ...")
 	vList := make([]*version.Version, 0)
 	for versionStr := range vTable {
-		v, err := version.NewVersion(versionStr)
+
+		v, err := version.NewVersion(string(versionStr))
 		if err != nil {
 			log.Fatalf("byway: Could not parse version: %s, %s", versionStr, err.Error())
 		}
@@ -145,7 +157,7 @@ func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxV
 
 		if v != nil && constraint.Check(v) {
 			log.Printf("byway: Accepted: %s", v)
-			binding := vTable[v.String()]
+			binding := vTable[VersionString(v.String())]
 			return &binding
 		}
 		log.Printf("byway: Rejected: %s", v)
@@ -157,11 +169,19 @@ func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxV
 	return nil
 }
 
-func newBywayProxy(serviceTable **ServiceTable) *httputil.ReverseProxy {
+func newBywayProxy(serviceTableChan chan ServiceTable) *httputil.ReverseProxy {
+	serviceTable := ServiceTable{}
+
+	go func() {
+		for {
+			serviceTable = <-serviceTableChan
+		}
+	}()
+
 	director := func(req *http.Request) {
 		log.Println("byway: -----------ROUTE BEGIN-----------")
 		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(**serviceTable, minVersion, maxVersion, serviceName)
+		binding := resolveBinding(serviceTable, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
 			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.Scheme, binding.Host, binding.Headers["host"])
@@ -184,7 +204,7 @@ func newBywayProxy(serviceTable **ServiceTable) *httputil.ReverseProxy {
 }
 
 // Init run the router
-func Init(serviceTable **ServiceTable) {
+func Init(serviceTable chan ServiceTable) {
 	go func() {
 		port := ":31337"
 		fmt.Printf("Running on " + port + "!\n")
