@@ -93,7 +93,6 @@ func readRedisConfig(redis *redis.Client) core.ServiceTable {
 }
 
 func watchRedis(channel chan core.ServiceTable) {
-
 	client := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // no password set
@@ -106,15 +105,18 @@ func watchRedis(channel chan core.ServiceTable) {
 	}
 	log.Printf("byway: redis: %s", pong)
 
-	//subscription, err := client.Subscribe("byway_config")
+	subscription, err := client.Subscribe("byway.update")
 
-	// if err != nil {
-	// 	log.Fatalf("byway: redis: %s\n", err)
-	// }
-	//subscription.
-	channel <- readRedisConfig(client)
-	//subscription.
+	if err != nil {
+		log.Fatalf("byway: redis: %s\n", err)
+	}
 
+	go func() {
+		for {
+			subscription.Receive()
+			channel <- readRedisConfig(client)
+		}
+	}()
 }
 
 func main() {
