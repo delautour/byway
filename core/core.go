@@ -32,8 +32,10 @@ type VersionString string
 // ServiceName - A name of a service
 type ServiceName string
 
-// ServiceTable - A list map of service / version bindings
-type ServiceTable map[ServiceName]map[VersionString]Binding
+// Config - A list map of service / version bindings
+type Config struct {
+	Mapping map[ServiceName]map[VersionString]Binding
+}
 
 // IdentityRewrite a rewrite rule which is the identity
 func IdentityRewrite(input string) string {
@@ -124,10 +126,10 @@ func bulidContraint(minVersion *version.Version, maxVersion *version.Version) ve
 	return constraint
 }
 
-func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *Binding {
+func resolveBinding(config *Config, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *Binding {
 
 	log.Printf("byway: -- Locating version table: %s --", serviceName)
-	vTable := serviceTable[serviceName]
+	vTable := config.Mapping[serviceName]
 	if vTable == nil {
 		log.Printf("byway: Could not locate version table")
 		return nil
@@ -169,19 +171,19 @@ func resolveBinding(serviceTable ServiceTable, minVersion *version.Version, maxV
 	return nil
 }
 
-func newBywayProxy(serviceTableChan chan ServiceTable) *httputil.ReverseProxy {
-	serviceTable := ServiceTable{}
+func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
+	config := &Config{}
 
 	go func() {
 		for {
-			serviceTable = <-serviceTableChan
+			config = <-configChan
 		}
 	}()
 
 	director := func(req *http.Request) {
 		log.Println("byway: -----------ROUTE BEGIN-----------")
 		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(serviceTable, minVersion, maxVersion, serviceName)
+		binding := resolveBinding(config, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
 			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.Scheme, binding.Host, binding.Headers["host"])
@@ -204,7 +206,7 @@ func newBywayProxy(serviceTableChan chan ServiceTable) *httputil.ReverseProxy {
 }
 
 // Init run the router
-func Init(serviceTable chan ServiceTable) {
+func Init(serviceTable chan *Config) {
 	go func() {
 		port := ":31337"
 		fmt.Printf("Running on " + port + "!\n")

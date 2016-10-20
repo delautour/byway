@@ -28,19 +28,19 @@ func mapEndpointConfig(endpointConfig endpointConfig) core.Binding {
 
 }
 
-func watchConfigFile(channel chan core.ServiceTable) {
+func watchConfigFile(channel chan *core.Config) {
 	configFile, err := ioutil.ReadFile("./conf.yml")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	config := make(map[string]map[string]endpointConfig)
-	yaml.Unmarshal(configFile, &config)
+	configFromFile := make(map[string]map[string]endpointConfig)
+	yaml.Unmarshal(configFile, &configFromFile)
 
 	log.Println("byway: Loading config")
 
-	newTable := make(core.ServiceTable)
-	for serviceName, versionMap := range config {
+	newConfig := core.Config{}
+	for serviceName, versionMap := range configFromFile {
 		versionTable := make(map[core.VersionString]core.Binding)
 		for versionStr, endpointConfig := range versionMap {
 			binding := mapEndpointConfig(endpointConfig)
@@ -48,12 +48,12 @@ func watchConfigFile(channel chan core.ServiceTable) {
 			versionTable[core.VersionString(versionStr)] = binding
 		}
 
-		newTable[core.ServiceName(serviceName)] = versionTable
+		newConfig.Mapping[core.ServiceName(serviceName)] = versionTable
 	}
-	channel <- newTable
+	channel <- &newConfig
 }
 
-func readRedisConfig(redis *redis.Client) core.ServiceTable {
+func readRedisConfig(redis *redis.Client) *core.Config {
 	indexName := "byway.service_index"
 	members := redis.SMembers(indexName)
 	if members.Err() != nil {
@@ -62,7 +62,7 @@ func readRedisConfig(redis *redis.Client) core.ServiceTable {
 
 	log.Printf("byway: redis: %s\n", members)
 
-	table := core.ServiceTable{}
+	config := core.Config{}
 
 	for _, serviceName := range members.Val() {
 		versionTable := make(map[core.VersionString]core.Binding)
@@ -86,13 +86,13 @@ func readRedisConfig(redis *redis.Client) core.ServiceTable {
 			versionTable[core.VersionString(serviceVersion)] = mapEndpointConfig(ep)
 		}
 
-		table[core.ServiceName(serviceName)] = versionTable
+		config.Mapping[core.ServiceName(serviceName)] = versionTable
 	}
 
-	return table
+	return &config
 }
 
-func watchRedis(channel chan core.ServiceTable) {
+func watchRedis(channel chan *core.Config) {
 	client := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // no password set
@@ -121,23 +121,23 @@ func watchRedis(channel chan core.ServiceTable) {
 
 func main() {
 	fmt.Println("Welcome to byway")
-	serviceTableWriter := make(chan core.ServiceTable)
-	serviceTableReader := make(chan core.ServiceTable)
+	configWriter := make(chan *core.Config)
+	configReader := make(chan *core.Config)
 
 	go func() {
 		for {
-			table := <-serviceTableReader
+			table := <-configReader
 
 			loaded, _ := yaml.Marshal(table)
 			log.Printf("byway: config updated\n%s", loaded)
 
-			serviceTableWriter <- table
+			configWriter <- table
 		}
 	}()
 
-	core.Init(serviceTableWriter)
+	core.Init(configWriter)
 
-	watchRedis(serviceTableReader)
+	watchRedis(configReader)
 	//watchConfigFile(serviceTableReader)
 
 	exit := make(chan bool)
