@@ -60,6 +60,7 @@ func readRedisConfig(redis *redis.Client) *core.Config {
 	if rewriteMembers.Err() != nil {
 		log.Fatalf("byway: redis: %s", rewriteMembers.Err())
 	}
+	log.Printf("byway: redis: %s\n", rewriteMembers)
 
 	for _, rewritePattern := range rewriteMembers.Val() {
 		config.Rewrites = append(config.Rewrites, core.NewRegexReplaceRewriteFromRewriteConfigString(core.RewriteConfigString(rewritePattern)))
