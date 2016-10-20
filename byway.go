@@ -39,7 +39,7 @@ func watchConfigFile(channel chan *core.Config) {
 
 	log.Println("byway: Loading config")
 
-	newConfig := core.Config{}
+	newConfig := core.NewConfig()
 	for serviceName, versionMap := range configFromFile {
 		versionTable := make(map[core.VersionString]core.Binding)
 		for versionStr, endpointConfig := range versionMap {
@@ -50,21 +50,28 @@ func watchConfigFile(channel chan *core.Config) {
 
 		newConfig.Mapping[core.ServiceName(serviceName)] = versionTable
 	}
-	channel <- &newConfig
+	channel <- newConfig
 }
 
 func readRedisConfig(redis *redis.Client) *core.Config {
-	indexName := "byway.service_index"
-	members := redis.SMembers(indexName)
-	if members.Err() != nil {
-		log.Fatalf("byway: redis: %s", members.Err())
+	config := core.NewConfig()
+
+	rewriteMembers := redis.LRange("byway.rewrite", 0, 0)
+	if rewriteMembers.Err() != nil {
+		log.Fatalf("byway: redis: %s", rewriteMembers.Err())
 	}
 
-	log.Printf("byway: redis: %s\n", members)
+	for _, rewritePattern := range rewriteMembers.Val() {
+		config.Rewrites = append(config.Rewrites, core.NewRegexReplaceRewriteFromRewriteConfigString(core.RewriteConfigString(rewritePattern)))
+	}
 
-	config := core.Config{}
-
-	for _, serviceName := range members.Val() {
+	indexName := "byway.service_index"
+	indexMembers := redis.SMembers(indexName)
+	if indexMembers.Err() != nil {
+		log.Fatalf("byway: redis: %s", indexMembers.Err())
+	}
+	log.Printf("byway: redis: %s\n", indexMembers)
+	for _, serviceName := range indexMembers.Val() {
 		versionTable := make(map[core.VersionString]core.Binding)
 
 		vtable := redis.HGetAll("byway.service." + serviceName)
@@ -89,7 +96,7 @@ func readRedisConfig(redis *redis.Client) *core.Config {
 		config.Mapping[core.ServiceName(serviceName)] = versionTable
 	}
 
-	return &config
+	return config
 }
 
 func watchRedis(channel chan *core.Config) {

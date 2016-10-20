@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -15,14 +16,14 @@ import (
 // Headers - a list of headers to set
 type Headers map[string]string
 
-// Rewrite - a path rewrite func
-type Rewrite func(string) string
+// StringRewrite - a path rewrite func
+type StringRewrite func(string) string
 
 // Binding - a endpoint binding
 type Binding struct {
 	Host          string
 	Scheme        string
-	PathRewriteFn Rewrite `yaml:"-"`
+	PathRewriteFn StringRewrite `yaml:"-"`
 	Headers       Headers
 }
 
@@ -32,9 +33,18 @@ type VersionString string
 // ServiceName - A name of a service
 type ServiceName string
 
+// ServiceMappingTable - A mapping of service name / version to binding
+type ServiceMappingTable map[ServiceName]map[VersionString]Binding
+
 // Config - A list map of service / version bindings
 type Config struct {
-	Mapping map[ServiceName]map[VersionString]Binding
+	Rewrites []StringRewrite `yaml:"-"`
+	Mapping  ServiceMappingTable
+}
+
+// NewConfig creates a new config object
+func NewConfig() *Config {
+	return &Config{Mapping: make(ServiceMappingTable), Rewrites: make([]StringRewrite, 0)}
 }
 
 // IdentityRewrite a rewrite rule which is the identity
@@ -42,16 +52,63 @@ func IdentityRewrite(input string) string {
 	return input
 }
 
+// RewriteConfigString a string in the format of:  <find regex>;<replace pattern>
+// Eg:   ^bob/(?.*)$;foo/$1
+// bob/bazzer -> foo/bazzer
+type RewriteConfigString string
+
+// NewRegexReplaceRewriteFromRewriteConfigString constructs a rewrite function from a RewriteConfigString
+func NewRegexReplaceRewriteFromRewriteConfigString(rewrite RewriteConfigString) StringRewrite {
+	str := string(rewrite)
+	p := strings.Split(str, ";")
+
+	if len(p) != 2 {
+		log.Fatalf("byway: NewRegexReplaceRewriteFromRewriteConfigString: invalid input: %s", str)
+	}
+
+	return NewRegexReplaceRewrite(p[0], p[1])
+}
+
 // NewRegexReplaceRewrite returns a new rewrite rule based on a regular expression
-func NewRegexReplaceRewrite(pattern string, replace string) Rewrite {
+func NewRegexReplaceRewrite(pattern string, replace string) StringRewrite {
 	re := regexp.MustCompile(pattern)
 
 	fn := func(input string) string {
 		result := re.ReplaceAllString(input, replace)
-		log.Printf("byway: Rewrite %s -> %s", input, result)
+		if result != input {
+			log.Printf("byway: Rewrite %s -> %s", input, result)
+		}
 		return result
 	}
 	return fn
+}
+
+func rewriteURL(config *Config, input *url.URL) *url.URL {
+	matched := make(map[string]bool)
+	accumulator := input.String()
+	for {
+		rewriteResult := accumulator
+		for _, rewrite := range config.Rewrites {
+			rewriteResult = rewrite(accumulator)
+			if rewriteResult != accumulator {
+				break
+			}
+		}
+		if rewriteResult == accumulator {
+			result, err := url.Parse(rewriteResult)
+			if err != nil {
+				log.Fatal(err)
+			}
+			return result
+		}
+		if matched[rewriteResult] {
+			log.Fatal("Recursive rewrite detected")
+
+		}
+		matched[rewriteResult] = true
+
+		accumulator = rewriteResult
+	}
 }
 
 func versionify(versionStr string) *version.Version {
@@ -65,11 +122,13 @@ func versionify(versionStr string) *version.Version {
 
 func extractRoutingParameters(req *http.Request) (*version.Version, *version.Version, ServiceName) {
 	log.Print("byway: -- extractRoutingParameters --")
+	log.Printf("byway: URL: %s ", req.URL)
 	var minVersion *version.Version
 	var maxVersion *version.Version
 	var serviceName string
 
-	hostComponents := strings.Split(req.Host, ".")
+	hostComponents := strings.Split(req.URL.Host, ".")
+	log.Printf("byway: host components:  %s ", hostComponents)
 
 	i := 0
 
@@ -83,7 +142,7 @@ func extractRoutingParameters(req *http.Request) (*version.Version, *version.Ver
 			log.Printf("byway: Could not identify min version")
 		}
 	} else {
-		log.Printf("byway: Found min version from host: %s", minVersion)
+		log.Printf("byway: Found min version from header: %s", minVersion)
 	}
 
 	maxVersion = versionify(req.Header.Get("x-byway-max"))
@@ -181,12 +240,19 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 	}()
 
 	director := func(req *http.Request) {
+		configSnapshot := config
 		log.Println("byway: -----------ROUTE BEGIN-----------")
+
+		req.URL.Host = req.Host
+		req.URL = rewriteURL(configSnapshot, req.URL)
+		req.Host = req.URL.Host
+
 		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(config, minVersion, maxVersion, serviceName)
+		binding := resolveBinding(configSnapshot, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
-			log.Printf("byway: Routing to %s://%s\nHost Header: %s", binding.Scheme, binding.Host, binding.Headers["host"])
+			req.URL = rewriteURL(config, req.URL)
+
 			req.Header.Add("X-Forwarded-Host", req.Host)
 			if binding.PathRewriteFn != nil {
 				req.URL.Path = binding.PathRewriteFn(req.URL.Path)
@@ -197,6 +263,8 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 			if req.Host == "" {
 				req.Host = binding.Host
 			}
+
+			log.Printf("byway: Routing to %s\nHost Header: %s", req.URL, binding.Headers["host"])
 
 		}
 		log.Println("byway: -----------ROUTE END-----------")
