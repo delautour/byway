@@ -1,0 +1,29 @@
+.code {
+  display: inline;
+  background: #E8C5CF;
+  border-radius: 4px;
+}
+
+:global {
+  dl {
+    margin: 0;
+  }
+
+  dt {
+    font-weight: bold;
+    text-decoration: underline;
+  }
+
+  dd {
+    margin: 0;
+    padding: 0 0 .5em;
+
+    > dl {
+      padding: 0 0 0 1em;
+    }
+  }
+
+  .card-panel {
+    margin: 2rem;
+  }
+}

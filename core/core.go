@@ -13,18 +13,31 @@ import (
 	"github.com/hashicorp/go-version"
 )
 
+// EndpointConfig  config of an endpoint
+type EndpointConfig struct {
+	Host    string            `json:"host"`
+	Scheme  string            `json:"scheme"`
+	Rewrite string            `json:"rewrite"`
+	Headers map[string]string `json:"headers"`
+}
+
+// Config - Raw byway configuration
+type Config struct {
+	Rewrites []RewriteConfigString                            `json:"rewrites"`
+	Mapping  map[ServiceName]map[VersionString]EndpointConfig `json:"services"`
+}
+
 // Headers - a list of headers to set
 type Headers map[string]string
 
 // StringRewrite - a path rewrite func
-type StringRewrite func(string) string
+type stringRewrite func(string) string
 
-// Binding - a endpoint binding
-type Binding struct {
-	Host          string
-	Scheme        string
-	PathRewriteFn StringRewrite `yaml:"-"`
-	Headers       Headers
+type binding struct {
+	host          string
+	scheme        string
+	pathRewriteFn stringRewrite
+	headers       Headers
 }
 
 // VersionString - A version of a service 1.0.0
@@ -33,18 +46,16 @@ type VersionString string
 // ServiceName - A name of a service
 type ServiceName string
 
-// ServiceMappingTable - A mapping of service name / version to binding
-type ServiceMappingTable map[ServiceName]map[VersionString]Binding
+type serviceMappingTable map[ServiceName]map[VersionString]binding
 
-// Config - A list map of service / version bindings
-type Config struct {
-	Rewrites []StringRewrite `yaml:"-"`
-	Mapping  ServiceMappingTable
+type config struct {
+	rewrites []stringRewrite
+	mapping  serviceMappingTable
 }
 
 // NewConfig creates a new config object
 func NewConfig() *Config {
-	return &Config{Mapping: make(ServiceMappingTable), Rewrites: make([]StringRewrite, 0)}
+	return &Config{Mapping: make(map[ServiceName]map[VersionString]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
 }
 
 // IdentityRewrite a rewrite rule which is the identity
@@ -57,8 +68,7 @@ func IdentityRewrite(input string) string {
 // bob/bazzer -> foo/bazzer
 type RewriteConfigString string
 
-// NewRegexReplaceRewriteFromRewriteConfigString constructs a rewrite function from a RewriteConfigString
-func NewRegexReplaceRewriteFromRewriteConfigString(rewrite RewriteConfigString) StringRewrite {
+func newRegexReplaceRewriteFromRewriteConfigString(rewrite RewriteConfigString) stringRewrite {
 	str := string(rewrite)
 	p := strings.Split(str, ";")
 
@@ -66,11 +76,10 @@ func NewRegexReplaceRewriteFromRewriteConfigString(rewrite RewriteConfigString) 
 		log.Fatalf("byway: NewRegexReplaceRewriteFromRewriteConfigString: invalid input: %s", str)
 	}
 
-	return NewRegexReplaceRewrite(p[0], p[1])
+	return newRegexReplaceRewrite(p[0], p[1])
 }
 
-// NewRegexReplaceRewrite returns a new rewrite rule based on a regular expression
-func NewRegexReplaceRewrite(pattern string, replace string) StringRewrite {
+func newRegexReplaceRewrite(pattern string, replace string) stringRewrite {
 	re := regexp.MustCompile(pattern)
 
 	fn := func(input string) string {
@@ -83,12 +92,12 @@ func NewRegexReplaceRewrite(pattern string, replace string) StringRewrite {
 	return fn
 }
 
-func rewriteURL(config *Config, input *url.URL) *url.URL {
+func rewriteURL(config *config, input *url.URL) *url.URL {
 	matched := make(map[string]bool)
 	accumulator := input.String()
 	for {
 		rewriteResult := accumulator
-		for _, rewrite := range config.Rewrites {
+		for _, rewrite := range config.rewrites {
 			rewriteResult = rewrite(accumulator)
 			if rewriteResult != accumulator {
 				break
@@ -109,6 +118,17 @@ func rewriteURL(config *Config, input *url.URL) *url.URL {
 
 		accumulator = rewriteResult
 	}
+}
+
+func mapConfig(rawConfig *Config) *config {
+	newConfig := config{}
+
+	for _, r := range rawConfig.Rewrites {
+		rewrite := newRegexReplaceRewriteFromRewriteConfigString(r)
+		newConfig.rewrites = append(newConfig.rewrites, rewrite)
+	}
+
+	return &newConfig
 }
 
 func versionify(versionStr string) *version.Version {
@@ -185,10 +205,10 @@ func bulidContraint(minVersion *version.Version, maxVersion *version.Version) ve
 	return constraint
 }
 
-func resolveBinding(config *Config, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *Binding {
+func resolveBinding(config *config, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *binding {
 
 	log.Printf("byway: -- Locating version table: %s --", serviceName)
-	vTable := config.Mapping[serviceName]
+	vTable := config.mapping[serviceName]
 	if vTable == nil {
 		log.Printf("byway: Could not locate version table")
 		return nil
@@ -231,11 +251,12 @@ func resolveBinding(config *Config, minVersion *version.Version, maxVersion *ver
 }
 
 func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
-	config := &Config{}
+	config := &config{}
 
 	go func() {
 		for {
-			config = <-configChan
+			rawConfig := <-configChan
+			config = mapConfig(rawConfig)
 		}
 	}()
 
@@ -254,17 +275,17 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 			req.URL = rewriteURL(config, req.URL)
 
 			req.Header.Add("X-Forwarded-Host", req.Host)
-			if binding.PathRewriteFn != nil {
-				req.URL.Path = binding.PathRewriteFn(req.URL.Path)
+			if binding.pathRewriteFn != nil {
+				req.URL.Path = binding.pathRewriteFn(req.URL.Path)
 			}
-			req.URL.Scheme = binding.Scheme
-			req.URL.Host = binding.Host
-			req.Host = binding.Headers["host"]
+			req.URL.Scheme = binding.scheme
+			req.URL.Host = binding.host
+			req.Host = binding.headers["host"]
 			if req.Host == "" {
-				req.Host = binding.Host
+				req.Host = binding.host
 			}
 
-			log.Printf("byway: Routing to %s\nHost Header: %s", req.URL, binding.Headers["host"])
+			log.Printf("byway: Routing to %s\nHost Header: %s", req.URL, binding.headers["host"])
 
 		}
 		log.Println("byway: -----------ROUTE END-----------")
@@ -276,7 +297,7 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 // Init run the router
 func Init(serviceTable chan *Config) {
 	go func() {
-		port := ":31337"
+		port := ":1080"
 		fmt.Printf("Running on " + port + "!\n")
 		proxy := newBywayProxy(serviceTable)
 
