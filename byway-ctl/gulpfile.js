@@ -44,6 +44,7 @@ gulp.task('webpack-dev-server', () => {
 
     new WebpackDevServer(compiler, {
         contentBase: 'dev-server',
+        historyApiFallback: true,
         hot: true,
         inline: true,
         stats: false,

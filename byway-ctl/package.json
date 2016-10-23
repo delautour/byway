@@ -17,9 +17,11 @@
   },
   "homepage": "https://github.com/Amerdrix/byway#readme",
   "devDependencies": {
+    "@types/classnames": "0.0.31",
     "@types/react": "^0.14.41",
     "@types/react-dom": "^0.14.18",
     "@types/whatwg-fetch": "0.0.32",
+    "classnames": "^2.2.5",
     "css-loader": "^0.25.0",
     "gulp": "^3.9.1",
     "node-notifier": "^4.6.1",
@@ -34,5 +36,9 @@
     "typescript": "^2.0.3",
     "webpack": "^1.13.2",
     "webpack-dev-server": "^1.16.2"
+  },
+  "dependencies": {
+    "navlette": "github:amerdrix/navlette",
+    "routelette": "github:amerdrix/routelette"
   }
 }
