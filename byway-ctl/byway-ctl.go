@@ -25,7 +25,6 @@ func createRewrite(w http.ResponseWriter, r *http.Request) {
 
 	} else if r.Method == http.MethodPost {
 		r.ParseForm()
-		log.Println(r.Form)
 		rewrite := string(r.Form["rewrite"][0])
 		log.Println(rewrite)
 		err := bywayRedis.CreateRewrite(core.RewriteConfigString(rewrite))
@@ -34,16 +33,42 @@ func createRewrite(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, err)
 		}
 		fmt.Fprint(w, "ok")
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
 
-	} else if r.Method == http.MethodDelete {
-		log.Println(r.Form)
-		err := r.ParseForm()
+func createService(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+
+	} else if r.Method == http.MethodPost {
+		r.ParseForm()
+		name := string(r.Form["name"][0])
+		log.Println(name)
+		err := bywayRedis.CreateService(core.ServiceName(name))
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, err)
 		}
+		fmt.Fprint(w, "ok")
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
 
-		fmt.Fprint(w, "delete ok")
+func createBinding(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+
+	} else if r.Method == http.MethodPost {
+		r.ParseForm()
+		name := string(r.Form["name"][0])
+		log.Println(name)
+		err := bywayRedis.CreateBinding(core.ServiceName(name))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, err)
+		}
+		fmt.Fprint(w, "ok")
 	} else {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -110,6 +135,10 @@ func main() {
 	http.HandleFunc("/", cors(serve(config)))
 	http.HandleFunc("/rewrite", cors(createRewrite))
 	http.HandleFunc("/deleteRewrite", cors(deleteRewrite))
+
+	http.HandleFunc("/createService", cors(createService))
+	http.HandleFunc("/createBinding", cors(createBinding))
+
 	err := http.ListenAndServe(port, nil)
 	if err != nil {
 		log.Fatal(err)

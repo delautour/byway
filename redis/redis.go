@@ -94,6 +94,33 @@ func CreateRewrite(rewrite core.RewriteConfigString) error {
 	})
 }
 
+// CreateService creates an empty service
+func CreateService(seviceName core.ServiceName) error {
+
+	return withRedis(func(r *redis.Client) error {
+		err := r.SAdd("byway.service_index", string(seviceName)).Err()
+		if err != nil {
+			return err
+		}
+
+		return r.Publish("byway.update", "go").Err()
+	})
+}
+
+// CreateBinding creates an empty service
+func CreateBinding(seviceName core.ServiceName) error {
+	CreateService(seviceName)
+
+	return withRedis(func(r *redis.Client) error {
+		err := r.SAdd("byway.service_index", string(seviceName)).Err()
+		if err != nil {
+			return err
+		}
+
+		return r.Publish("byway.update", "go").Err()
+	})
+}
+
 // RemoveRewrite creates a rewrite rule
 func RemoveRewrite(index int64, rewrite core.RewriteConfigString) error {
 

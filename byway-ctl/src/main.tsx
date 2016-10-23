@@ -73,6 +73,22 @@ function createRewrite(rewrite: string) {
 }
 
 
+function createService(name: string) {
+
+    return () => {
+        const data = new FormData()
+        fetch("http://localhost:1081/createService", {
+            method: "POST",
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `name=${encodeURIComponent(name)}`
+        })
+            .then(refresh)
+    }
+}
+
+
 /*
  JSX elements
 */
@@ -93,15 +109,15 @@ class NewRewrite extends React.Component<{}, { match?: string, replace?: string 
             <input className="col s5" type="text" value={this.state.replace} onChange={e => this.setState({ replace: (e.target as HTMLInputElement).value })} />
 
             <div className="col s1">
-            <a className="waves-effect waves-light btn" disabled={!this.state.match || !this.state.replace} onClick={() => {
-                if(!this.state.match || !this.state.replace)
-                    return
-                const rewrite = `${this.state.match};${this.state.replace}`
+                <a className="waves-effect waves-light btn" disabled={!this.state.match || !this.state.replace} onClick={() => {
+                    if (!this.state.match || !this.state.replace)
+                        return
+                    const rewrite = `${this.state.match};${this.state.replace}`
 
-                createRewrite(rewrite)()
-                this.setState({ match: '', replace: '' })
-            }
-            }> Create Create</a>
+                    createRewrite(rewrite)()
+                    this.setState({ match: '', replace: '' })
+                }
+                }> Create Create</a>
             </div>
         </div>
     }
@@ -127,23 +143,36 @@ function Rewrites({ rewrites }: { rewrites: RewriteList }) {
     </div>
 }
 
+class CreateService extends React.Component<{}, { name: string }> {
+    constructor() {
+        super()
+        this.state = { name: '' }
+    }
+
+    render() {
+        return <div className="row">
+            <input
+                type="text"
+                value={this.state.name}
+                onChange={(e) => this.setState({ name: (e.target as HTMLInputElement).value })}
+                className="col s9" />
+            <div className="col s3" > <a  onClick={createService(this.state.name)} className="btn align-center waves-effect waves-light">+</a></div>
+        </div>
+
+    }
+}
+
 class Services extends React.Component<{ router: Router, services: ServiceMap }, { service: string }> {
     constructor() {
         super()
 
         this.state = { service: '' }
     }
+
     componentWillMount() {
-
-        if (this.props.router) {
-
-            this.servicePathBuilder = this.props.router.register(":name", ({name}: { name: string }) => {
-                this.setState({ service: name })
-            })
-
-        } else {
-            this.servicePathBuilder = () => "/services/humbug"
-        }
+        this.servicePathBuilder = this.props.router.register(":name", ({name}: { name: string }) => {
+            this.setState({ service: name })
+        })
     }
 
     render() {
@@ -154,12 +183,15 @@ class Services extends React.Component<{ router: Router, services: ServiceMap },
                 <div className="col s3">
                     <ul className="collection">
                         {Object.keys(services).map(serviceName => {
-                            return <li className= {cn("collection-item", {active: serviceName == this.state.service })} key={serviceName} onClick={() => nav.navTo(
+                            return <li className={cn("collection-item", { active: serviceName == this.state.service })} key={serviceName} onClick={() => nav.navTo(
                                 this.servicePathBuilder({ name: serviceName })
                             )()} > {serviceName} </li>
                         })
                         }
-                    </ul></div>
+
+                        <CreateService />
+                    </ul>
+                </div>
 
                 {service && <div className="col s9">
                     <ul >{
@@ -170,8 +202,6 @@ class Services extends React.Component<{ router: Router, services: ServiceMap },
                     } </ul>
                 </div>
                 }
-
-
             </div>)
     }
 
@@ -195,7 +225,7 @@ class Byway extends React.Component<BywayConfig, { pageContent: (config: BywayCo
     constructor() {
         super()
 
-        this.state = { pageContent: this.services.bind(this) }
+        this.state = { pageContent: () => null }
 
 
         this.servicesPathBuilder = router.register("services", (_, r) =>
@@ -207,6 +237,12 @@ class Byway extends React.Component<BywayConfig, { pageContent: (config: BywayCo
                 pageContent: (config) => this.rewrites(config)
             })
         })
+
+        router.register("", (_, r) => {
+            var p = this.servicesPathBuilder({})
+            nav.navTo(p)()
+        }
+        )
     }
 
     services(config, router: Router) {
@@ -253,6 +289,5 @@ function refresh() {
 
 ReactDOM.render(<Byway rewrites={[]} services={{}} />, document.querySelector('Byway'))
 refresh()
-
 
 nav.attach()
