@@ -38,7 +38,7 @@ func main() {
 		svc.Run("Byway", &bywayService{})
 	}
 
-	fmt.Printf("Welcome to byway - windows %b!", interactive)
+	fmt.Printf("Welcome to byway - windows %s", interactive? "interactive": "")
 
 	config := make(chan *core.Config, 1)
 
