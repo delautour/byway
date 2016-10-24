@@ -1,4 +1,4 @@
-package bywayRedis
+package bywayConfig
 
 import (
 	"encoding/json"

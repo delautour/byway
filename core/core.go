@@ -23,8 +23,8 @@ type EndpointConfig struct {
 
 // Config - Raw byway configuration
 type Config struct {
-	Rewrites []RewriteConfigString                `json:"rewrites" yaml:"rewrites"`
-	Mapping  map[string]map[string]EndpointConfig `json:"services" yaml:"services"`
+	Rewrites []RewriteConfigString                            `json:"rewrites" yaml:"rewrites"`
+	Mapping  map[ServiceName]map[VersionString]EndpointConfig `json:"services" yaml:"services"`
 }
 
 // Headers - a list of headers to set
@@ -55,7 +55,7 @@ type config struct {
 
 // NewConfig creates a new config object
 func NewConfig() *Config {
-	return &Config{Mapping: make(map[string]map[string]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
+	return &Config{Mapping: make(map[ServiceName]map[VersionString]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
 }
 
 // IdentityRewrite a rewrite rule which is the identity
