@@ -6,18 +6,8 @@ import (
 	"log"
 
 	"github.com/amerdrix/byway/core"
-	"github.com/amerdrix/byway/redis"
 	"gopkg.in/yaml.v2"
 )
-
-
-func mapEndpointConfig(endpointConfig endpointConfig) core.Binding {
-	return core.Binding{
-		Host:          endpointConfig.Host,
-		Scheme:        endpointConfig.Scheme,
-		Headers:       endpointConfig.Headers,
-		PathRewriteFn: core.IdentityRewrite}
-}
 
 func watchConfigFile(channel chan *core.Config) {
 	configFile, err := ioutil.ReadFile("./conf.yml")
@@ -25,22 +15,14 @@ func watchConfigFile(channel chan *core.Config) {
 		log.Fatal(err)
 	}
 
-	configFromFile := make(map[string]map[string]endpointConfig)
-	yaml.Unmarshal(configFile, &configFromFile)
-
 	log.Println("byway: Loading config")
-
 	newConfig := core.NewConfig()
-	for serviceName, versionMap := range configFromFile {
-		versionTable := make(map[core.VersionString]core.Binding)
-		for versionStr, endpointConfig := range versionMap {
-			binding := mapEndpointConfig(endpointConfig)
 
-			versionTable[core.VersionString(versionStr)] = binding
-		}
-
-		newConfig.Mapping[core.ServiceName(serviceName)] = versionTable
+	err = yaml.Unmarshal(configFile, &newConfig)
+	if err != nil {
+		log.Fatal(err)
 	}
+
 	channel <- newConfig
 }
 
@@ -62,9 +44,9 @@ func main() {
 
 	core.Init(configWriter)
 
-	bywayRedis.WatchRedis(configReader)
+	//bywayRedis.WatchRedis(configReader)
 
-	//watchConfigFile(serviceTableReader)
+	watchConfigFile(configReader)
 
 	exit := make(chan bool)
 	<-exit

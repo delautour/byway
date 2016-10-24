@@ -23,8 +23,8 @@ type EndpointConfig struct {
 
 // Config - Raw byway configuration
 type Config struct {
-	Rewrites []RewriteConfigString                            `json:"rewrites"`
-	Mapping  map[ServiceName]map[VersionString]EndpointConfig `json:"services"`
+	Rewrites []RewriteConfigString                `json:"rewrites" yaml:"rewrites"`
+	Mapping  map[string]map[string]EndpointConfig `json:"services" yaml:"services"`
 }
 
 // Headers - a list of headers to set
@@ -55,7 +55,7 @@ type config struct {
 
 // NewConfig creates a new config object
 func NewConfig() *Config {
-	return &Config{Mapping: make(map[ServiceName]map[VersionString]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
+	return &Config{Mapping: make(map[string]map[string]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
 }
 
 // IdentityRewrite a rewrite rule which is the identity
@@ -119,13 +119,30 @@ func rewriteURL(config *config, input *url.URL) *url.URL {
 		accumulator = rewriteResult
 	}
 }
+func mapEndpointConfig(endpointConfig EndpointConfig) binding {
+	return binding{
+		host:          endpointConfig.Host,
+		scheme:        endpointConfig.Scheme,
+		headers:       endpointConfig.Headers,
+		pathRewriteFn: IdentityRewrite}
+}
 
 func mapConfig(rawConfig *Config) *config {
-	newConfig := config{}
+	newConfig := config{mapping: make(map[ServiceName]map[VersionString]binding)}
 
 	for _, r := range rawConfig.Rewrites {
 		rewrite := newRegexReplaceRewriteFromRewriteConfigString(r)
 		newConfig.rewrites = append(newConfig.rewrites, rewrite)
+	}
+
+	for k, v := range rawConfig.Mapping {
+
+		version := make(map[VersionString]binding)
+		newConfig.mapping[ServiceName(k)] = version
+		for k, v := range v {
+			version[VersionString(k)] = mapEndpointConfig(v)
+		}
+
 	}
 
 	return &newConfig
