@@ -9,7 +9,8 @@ import (
 	"github.com/amerdrix/byway/core"
 )
 
-func WatchConfigFile(channel chan *core.Config) {
+// WatchConfigFile watches config file for proxy config
+func WatchConfigFile(channel chan *core.Config, exit chan bool) {
 	configFile, err := ioutil.ReadFile("./conf.yml")
 	if err != nil {
 		log.Fatal(err)

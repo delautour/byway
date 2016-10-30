@@ -312,12 +312,15 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 }
 
 // Init run the router
-func Init(serviceTable chan *Config) {
+func Init(serviceTable chan *Config, exit chan bool) {
 	go func() {
 		port := ":1080"
 		fmt.Printf("Running on " + port + "!\n")
 		proxy := newBywayProxy(serviceTable)
 
-		http.ListenAndServe(port, proxy)
+		err := http.ListenAndServe(port, proxy)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}()
 }

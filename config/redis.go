@@ -149,7 +149,7 @@ func RemoveRewrite(index int64, rewrite core.RewriteConfigString) error {
 }
 
 // WatchRedis - reads config from redis into the provided channel
-func WatchRedis(channel chan *core.Config) {
+func WatchRedis(channel chan *core.Config, exit chan bool) {
 	withRedis(func(redis *redis.Client) error {
 		subscription, err := redis.Subscribe("byway.update")
 
