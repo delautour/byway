@@ -47,7 +47,7 @@ interface BywayConfig {
 function deleteRewrite(index: number, rewrite: string) {
     return () => {
         const data = new FormData()
-        fetch("http://localhost:1081/deleteRewrite", {
+        fetch("http://localhost:1091/deleteRewrite", {
             method: "POST",
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -61,7 +61,7 @@ function deleteRewrite(index: number, rewrite: string) {
 function createRewrite(rewrite: string) {
     return () => {
         const data = new FormData()
-        fetch("http://localhost:1081/rewrite", {
+        fetch("http://localhost:1091/rewrite", {
             method: "POST",
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -77,7 +77,7 @@ function createService(name: string) {
 
     return () => {
         const data = new FormData()
-        fetch("http://localhost:1081/createService", {
+        fetch("http://localhost:1091/createService", {
             method: "POST",
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -280,7 +280,7 @@ class Byway extends React.Component<BywayConfig, { pageContent: (config: BywayCo
 }
 
 function refresh() {
-    fetch('http://localhost:1081')
+    fetch('http://localhost:1091')
         .then(x => x.json())
         .then(config => {
             ReactDOM.render(<Byway {...config} />, document.querySelector('Byway'))

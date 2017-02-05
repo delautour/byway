@@ -70,17 +70,13 @@ gulp.task('proxy:build', () => {
 })
 gulp.task('proxy:run', ['proxy:build'], runProc('byway-proxy'))
 
-gulp.task('dev', ['ctl:run', 'proxy:run', 'webpack-dev-server'], () => {
+gulp.task('dev', ['ctl:run', 'webpack-dev-server'], () => {
 
     gulp.watch([
         '../**/*.go'
     ], ['ctl:run'])
 
-    gulp.watch([
-        '../**/*.go'
-    ], ['proxy:run'])
-
-    
+  
 
 
 })

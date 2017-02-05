@@ -8,8 +8,8 @@ import (
 
 	"encoding/json"
 
+	"github.com/amerdrix/byway/config"
 	"github.com/amerdrix/byway/core"
-	"github.com/amerdrix/byway/redis"
 )
 
 func cors(inner func(w http.ResponseWriter, r *http.Request)) func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +27,7 @@ func createRewrite(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		rewrite := string(r.Form["rewrite"][0])
 		log.Println(rewrite)
-		err := bywayRedis.CreateRewrite(core.RewriteConfigString(rewrite))
+		err := bywayConfig.CreateRewrite(core.RewriteConfigString(rewrite))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, err)
@@ -45,7 +45,7 @@ func createService(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		name := string(r.Form["name"][0])
 		log.Println(name)
-		err := bywayRedis.CreateService(core.ServiceName(name))
+		err := bywayConfig.CreateService(core.ServiceName(name))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, err)
@@ -57,13 +57,22 @@ func createService(w http.ResponseWriter, r *http.Request) {
 }
 
 func createBinding(w http.ResponseWriter, r *http.Request) {
+	log.Println("create binding ------------")
 	if r.Method == http.MethodOptions {
 
 	} else if r.Method == http.MethodPost {
 		r.ParseForm()
-		name := string(r.Form["name"][0])
+		name := string(r.Form["service_name"][0])
+		version := string(r.Form["version"][0])
+
+		endpoint := core.EndpointConfig{
+			Host:    r.Form["host"][0],
+			Scheme:  r.Form["scheme"][0],
+			Headers: make(map[string]string),
+		}
+
 		log.Println(name)
-		err := bywayRedis.CreateBinding(core.ServiceName(name))
+		err := bywayConfig.CreateBinding(core.ServiceName(name), core.VersionString(version), &endpoint)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, err)
@@ -92,7 +101,7 @@ func deleteRewrite(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprint(w, err)
 			return
 		}
-		err = bywayRedis.RemoveRewrite(int64(index), core.RewriteConfigString(r.FormValue("rewrite")))
+		err = bywayConfig.RemoveRewrite(int64(index), core.RewriteConfigString(r.FormValue("rewrite")))
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, err)
@@ -126,11 +135,12 @@ func serve(configChan chan *core.Config) func(http.ResponseWriter, *http.Request
 }
 
 func main() {
-	port := ":1081"
+	port := ":1091"
 	fmt.Printf("Running manage on port %s\n", port)
 
 	config := make(chan *core.Config)
-	bywayRedis.WatchRedis(config)
+	exit := make(chan bool)
+	bywayConfig.WatchRedis(config, exit)
 
 	http.HandleFunc("/", cors(serve(config)))
 	http.HandleFunc("/rewrite", cors(createRewrite))
@@ -143,7 +153,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	exit <- true
 	fmt.Printf("Goodbye")
 
 }

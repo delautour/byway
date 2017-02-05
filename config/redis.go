@@ -18,9 +18,9 @@ func withRedis(cb func(redis *redis.Client) error) error {
 	}
 
 	redisClientSingleton = redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
+		Addr:     "rawddss101v:6379",
 		Password: "", // no password set
-		DB:       0,  // use default DB
+		DB:       9,  // use default DB
 	})
 
 	pong, err := redisClientSingleton.Ping().Result()
@@ -108,11 +108,16 @@ func CreateService(seviceName core.ServiceName) error {
 }
 
 // CreateBinding creates an empty service
-func CreateBinding(seviceName core.ServiceName) error {
-	CreateService(seviceName)
-
+func CreateBinding(seviceName core.ServiceName, version core.VersionString, endpoint *core.EndpointConfig) error {
 	return withRedis(func(r *redis.Client) error {
 		err := r.SAdd("byway.service_index", string(seviceName)).Err()
+		if err != nil {
+			return err
+		}
+
+		config, err := json.Marshal(endpoint)
+
+		err = r.HSet("byway.service."+string(seviceName), string(version), string(config)).Err()
 		if err != nil {
 			return err
 		}
