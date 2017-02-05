@@ -27,12 +27,7 @@ func (m *bywayService) Execute(args []string, r <-chan svc.ChangeRequest, change
 
 	config := make(chan *core.Config, 1)
 	exit := make(chan bool)
-
-	// // elog.Error(0, "Config")
 	bywayConfig.WatchRedis(config, exit)
-	// bywayConfig.WatchConfigFile(config, exit)
-
-	// // elog.Error(0, "Init")
 	core.Init(bywayConfig.LogConfig(config), exit)
 
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
@@ -160,7 +155,13 @@ func main() {
 				log.Fatal(err)
 			}
 		} else {
-			log.Printf("We will run byway here!")
+
+			config := make(chan *core.Config, 1)
+			exit := make(chan bool)
+			bywayConfig.WatchRedis(config, exit)
+			core.Init(bywayConfig.LogConfig(config), exit)
+
+			<-exit
 		}
 
 	}

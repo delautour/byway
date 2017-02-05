@@ -53,6 +53,7 @@ func readRedisConfig(redis *redis.Client) *core.Config {
 		log.Fatalf("byway: redis: %s", indexMembers.Err())
 	}
 	log.Printf("byway: redis: %s\n", indexMembers)
+
 	for _, serviceName := range indexMembers.Val() {
 		versionTable := make(map[core.VersionString]core.EndpointConfig)
 
@@ -76,6 +77,23 @@ func readRedisConfig(redis *redis.Client) *core.Config {
 		}
 
 		config.Mapping[core.ServiceName(serviceName)] = versionTable
+	}
+
+	for _, key := range redis.Keys("byway.topology.*").Val() {
+		redisHash := redis.HGetAll(key)
+		if redisHash.Err() != nil {
+			log.Fatalf("byway: redis: %s", redisHash.Err())
+		}
+
+		vTable := make(map[core.ServiceName]core.VersionString)
+		for service, version := range redisHash.Val() {
+			vTable[core.ServiceName(service)] = core.VersionString(version)
+		}
+
+		config.Topologies[core.TopologyKey(key[15:len(key)])] = vTable
+
+		log.Printf("byway: redis: topology: %s, %s", key, vTable)
+
 	}
 
 	return config

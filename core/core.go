@@ -23,8 +23,9 @@ type EndpointConfig struct {
 
 // Config - Raw byway configuration
 type Config struct {
-	Rewrites []RewriteConfigString                            `json:"rewrites" yaml:"rewrites"`
-	Mapping  map[ServiceName]map[VersionString]EndpointConfig `json:"services" yaml:"services"`
+	Rewrites   []RewriteConfigString                            `json:"rewrites" yaml:"rewrites"`
+	Mapping    map[ServiceName]map[VersionString]EndpointConfig `json:"services" yaml:"services"`
+	Topologies map[TopologyKey]map[ServiceName]VersionString    `json:"topologies" yaml:"topologies"`
 }
 
 // Headers - a list of headers to set
@@ -40,6 +41,9 @@ type binding struct {
 	headers       Headers
 }
 
+// TopologyKey - a key represenenting a specific topology
+type TopologyKey string
+
 // VersionString - A version of a service 1.0.0
 type VersionString string
 
@@ -47,15 +51,20 @@ type VersionString string
 type ServiceName string
 
 type serviceMappingTable map[ServiceName]map[VersionString]binding
+type topologyTable map[TopologyKey]map[ServiceName]VersionString
 
 type config struct {
-	rewrites []stringRewrite
-	mapping  serviceMappingTable
+	rewrites   []stringRewrite
+	mapping    serviceMappingTable
+	topologies topologyTable
 }
 
 // NewConfig creates a new config object
 func NewConfig() *Config {
-	return &Config{Mapping: make(map[ServiceName]map[VersionString]EndpointConfig), Rewrites: make([]RewriteConfigString, 0)}
+	return &Config{
+		Mapping:    make(map[ServiceName]map[VersionString]EndpointConfig),
+		Topologies: make(map[TopologyKey]map[ServiceName]VersionString),
+		Rewrites:   make([]RewriteConfigString, 0)}
 }
 
 // IdentityRewrite a rewrite rule which is the identity
@@ -128,7 +137,10 @@ func mapEndpointConfig(endpointConfig EndpointConfig) binding {
 }
 
 func mapConfig(rawConfig *Config) *config {
-	newConfig := config{mapping: make(map[ServiceName]map[VersionString]binding)}
+	newConfig := config{
+		mapping:    make(map[ServiceName]map[VersionString]binding),
+		topologies: rawConfig.Topologies,
+	}
 
 	for _, r := range rawConfig.Rewrites {
 		rewrite := newRegexReplaceRewriteFromRewriteConfigString(r)
@@ -142,7 +154,10 @@ func mapConfig(rawConfig *Config) *config {
 		for k, v := range v {
 			version[VersionString(k)] = mapEndpointConfig(v)
 		}
+	}
 
+	if newConfig.topologies == nil {
+		newConfig.topologies = make(map[TopologyKey]map[ServiceName]VersionString)
 	}
 
 	return &newConfig
@@ -157,7 +172,7 @@ func versionify(versionStr string) *version.Version {
 	return v
 }
 
-func extractRoutingParameters(req *http.Request) (*version.Version, *version.Version, ServiceName) {
+func extractRoutingParameters(req *http.Request) (TopologyKey, *version.Version, *version.Version, ServiceName) {
 	log.Print("byway: -- extractRoutingParameters --")
 	log.Printf("byway: URL: %s ", req.URL)
 	var minVersion *version.Version
@@ -168,6 +183,15 @@ func extractRoutingParameters(req *http.Request) (*version.Version, *version.Ver
 	log.Printf("byway: host components:  %s ", hostComponents)
 
 	i := 0
+
+	topologyKey := TopologyKey(req.Header.Get("x-byway-topology"))
+	if strings.HasPrefix(hostComponents[i], "t-") {
+
+		topologyKey = TopologyKey(hostComponents[i])
+		topologyKey = topologyKey[2:len(topologyKey)]
+		log.Printf("byway: Identified topology from host: %s", topologyKey)
+		i++
+	}
 
 	minVersion = versionify(req.Header.Get("x-byway-min"))
 	if minVersion == nil {
@@ -203,7 +227,7 @@ func extractRoutingParameters(req *http.Request) (*version.Version, *version.Ver
 		log.Printf("byway: Identified service from header: %s", serviceName)
 	}
 
-	return minVersion, maxVersion, ServiceName(serviceName)
+	return topologyKey, minVersion, maxVersion, ServiceName(serviceName)
 }
 
 func bulidContraint(minVersion *version.Version, maxVersion *version.Version) version.Constraints {
@@ -222,13 +246,28 @@ func bulidContraint(minVersion *version.Version, maxVersion *version.Version) ve
 	return constraint
 }
 
-func resolveBinding(config *config, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *binding {
+func resolveBinding(config *config, topoloyKey TopologyKey, minVersion *version.Version, maxVersion *version.Version, serviceName ServiceName) *binding {
 
 	log.Printf("byway: -- Locating version table: %s --", serviceName)
 	vTable := config.mapping[serviceName]
 	if vTable == nil {
-		log.Printf("byway: Could not locate version table")
+		log.Printf("byway: Could not locate version table for service. %s", serviceName)
 		return nil
+	}
+
+	log.Printf("byway: Checking for topology %s", topoloyKey)
+	topology := config.topologies[topoloyKey]
+	if topology != nil {
+		log.Printf("byway: Checking for %s in topology table", string(serviceName))
+
+		specificVersion := topology[serviceName]
+
+		if specificVersion != "" {
+			log.Printf("byway: Topology definens specific version: %s:%s", string(serviceName), string(specificVersion))
+
+			binding := vTable[specificVersion]
+			return &binding
+		}
 	}
 
 	log.Println("byway: Building version list ...")
@@ -285,8 +324,8 @@ func newBywayProxy(configChan chan *Config) *httputil.ReverseProxy {
 		req.URL = rewriteURL(configSnapshot, req.URL)
 		req.Host = req.URL.Host
 
-		minVersion, maxVersion, serviceName := extractRoutingParameters(req)
-		binding := resolveBinding(configSnapshot, minVersion, maxVersion, serviceName)
+		topologyKey, minVersion, maxVersion, serviceName := extractRoutingParameters(req)
+		binding := resolveBinding(configSnapshot, topologyKey, minVersion, maxVersion, serviceName)
 
 		if binding != nil {
 			req.URL = rewriteURL(config, req.URL)
