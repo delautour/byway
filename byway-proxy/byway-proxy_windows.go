@@ -25,27 +25,31 @@ func (m *bywayService) Execute(args []string, r <-chan svc.ChangeRequest, change
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown
 	changes <- svc.Status{State: svc.StartPending}
 
-	elog.Error(0, "Making channels")
 	config := make(chan *core.Config, 1)
 	exit := make(chan bool)
 
-	elog.Error(0, "Config")
-	//	bywayConfig.WatchRedis(config)
-	bywayConfig.WatchConfigFile(config, exit)
+	// // elog.Error(0, "Config")
+	bywayConfig.WatchRedis(config, exit)
+	// bywayConfig.WatchConfigFile(config, exit)
 
-	elog.Error(0, "Init")
+	// // elog.Error(0, "Init")
 	core.Init(bywayConfig.LogConfig(config), exit)
 
 	changes <- svc.Status{State: svc.Running, Accepts: cmdsAccepted}
+
+	go func() {
+		<-exit
+	}()
 
 loop:
 	for {
 		c := <-r
 		switch c.Cmd {
+		case svc.Interrogate:
+			changes <- c.CurrentStatus
 		case svc.Stop, svc.Shutdown:
 			changes <- svc.Status{State: svc.StopPending}
-			os.Exit(0)
-
+			exit <- true
 			break loop
 		default:
 
@@ -138,19 +142,26 @@ func main() {
 	if !interactive {
 		svc.Run(svcName, &bywayService{})
 	} else {
+		log.Printf("%s", os.Args)
+		if len(os.Args) == 2 {
+			var err error
+			cmd := strings.ToLower(os.Args[1])
+			switch cmd {
 
-		var err error
-		cmd := strings.ToLower(os.Args[1])
-		switch cmd {
+			case "install":
+				err = installService(svcName, "Byway proxy service")
+			case "remove":
+				err = removeService(svcName)
+			default:
+				log.Fatalf("unknown command: %s", cmd)
+			}
 
-		case "install":
-			err = installService(svcName, "Byway proxy service")
-		case "remove":
-			err = removeService(svcName)
+			if err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			log.Printf("We will run byway here!")
 		}
 
-		if err != nil {
-			log.Fatal(err)
-		}
 	}
 }
