@@ -57,7 +57,6 @@ func createService(w http.ResponseWriter, r *http.Request) {
 }
 
 func createBinding(w http.ResponseWriter, r *http.Request) {
-	log.Println("create binding ------------")
 	if r.Method == http.MethodOptions {
 
 	} else if r.Method == http.MethodPost {
@@ -73,6 +72,28 @@ func createBinding(w http.ResponseWriter, r *http.Request) {
 
 		log.Println(name)
 		err := bywayConfig.CreateBinding(core.ServiceName(name), core.VersionString(version), &endpoint)
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, err)
+		}
+		fmt.Fprint(w, "ok")
+	} else {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+	}
+}
+
+func addServiceToTopology(w http.ResponseWriter, r *http.Request) {
+	log.Println("addServiceToTopology ------------")
+	if r.Method == http.MethodOptions {
+
+	} else if r.Method == http.MethodPost {
+		r.ParseForm()
+		name := string(r.Form["service_name"][0])
+		version := string(r.Form["service_version"][0])
+		key := string(r.Form["topology_key"][0])
+
+		log.Println(name)
+		err := bywayConfig.AddServiceToTopology(core.TopologyKey(key), core.ServiceName(name), core.VersionString(version))
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprint(w, err)
@@ -148,6 +169,7 @@ func main() {
 
 	http.HandleFunc("/createService", cors(createService))
 	http.HandleFunc("/createBinding", cors(createBinding))
+	http.HandleFunc("/addServiceToTopology", cors(addServiceToTopology))
 
 	err := http.ListenAndServe(port, nil)
 	if err != nil {

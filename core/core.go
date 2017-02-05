@@ -276,9 +276,10 @@ func resolveBinding(config *config, topoloyKey TopologyKey, minVersion *version.
 
 		v, err := version.NewVersion(string(versionStr))
 		if err != nil {
-			log.Fatalf("byway: Could not parse version: %s, %s", versionStr, err.Error())
+			log.Printf("byway: Could not parse version: %s, %s", versionStr, err.Error())
+		} else {
+			vList = append(vList, v)
 		}
-		vList = append(vList, v)
 	}
 
 	log.Println("byway: Sorting version list ...")

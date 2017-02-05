@@ -125,7 +125,7 @@ func CreateService(seviceName core.ServiceName) error {
 	})
 }
 
-// CreateBinding creates an empty service
+// CreateBinding creates binding to an endpoint
 func CreateBinding(seviceName core.ServiceName, version core.VersionString, endpoint *core.EndpointConfig) error {
 	return withRedis(func(r *redis.Client) error {
 		err := r.SAdd("byway.service_index", string(seviceName)).Err()
@@ -140,6 +140,17 @@ func CreateBinding(seviceName core.ServiceName, version core.VersionString, endp
 			return err
 		}
 
+		return r.Publish("byway.update", "go").Err()
+	})
+}
+
+// AddServiceToTopology adds a service binding to a topology
+func AddServiceToTopology(key core.TopologyKey, service core.ServiceName, version core.VersionString) error {
+	return withRedis(func(r *redis.Client) error {
+		err := r.HSet("byway.topology."+string(key), string(service), string(version)).Err()
+		if err != nil {
+			return err
+		}
 		return r.Publish("byway.update", "go").Err()
 	})
 }
